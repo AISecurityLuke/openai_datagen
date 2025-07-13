@@ -1,0 +1,117 @@
+# API Keys and Sensitive Data
+key.md
+*.key
+*.pem
+*.p12
+api_key*
+api-key*
+openai_key*
+openai-key*
+secret*
+token*
+credential*
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# Configuration files that might contain keys
+config.local.json
+config.prod.json
+config.dev.json
+*_config.json
+*_config.yaml
+*_config.yml
+
+# Logs and metadata that might contain sensitive info
+*.log
+logs/
+generation.log
+pipeline.log
+generation_metadata.json
+rejected_requests.jsonl
+rejected_requests.jsonl.bak
+
+# Generated data (optional - uncomment if you don't want to track generated data)
+# generated_prompts.jsonl
+# combined.json
+# datasets/
+# visuals/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Cache directories
+.cache/
+cache/
+
+# Backup files
+*.backup
+*.old
+*.orig
+
+# Any file with "key" in the name (case insensitive)
+*[Kk][Ee][Yy]*
+*[Ss][Ee][Cc][Rr][Ee][Tt]*
+*[Tt][Oo][Kk][Ee][Nn]*
+*[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]* 

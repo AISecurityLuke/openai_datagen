@@ -1,0 +1,141 @@
+{
+  "workflow": {
+    "name": "text_prompt_generator",
+    "version": "1.0.0",
+    "description": "Generate diverse text prompts for training datasets"
+  },
+  "generation": {
+    "num_samples": 500,
+    "batch_size": 50,
+    "max_retries": 3,
+    "temperature": 0.88,
+    "top_p": 0.92,
+    "max_tokens": 200,
+    "model": "gpt-4.1-mini",
+    "premium_model": "gpt-4.1",
+    "premium_ratio": 0.01,
+    "parallel_workers": 25,
+    "rate_limit_per_minute": 1500
+  },
+  "schema": {
+    "fields": {
+      "text": {
+        "type": "string",
+        "description": "The generated text prompt",
+        "required": true
+      },
+      "label": {
+        "type": "integer",
+        "description": "Classification label (0 for benign, 1 for malicious, 2 for explicit jailbreak)",
+        "required": true,
+        "values": [0, 1, 2]
+      },
+      "lang": {
+        "type": "string",
+        "description": "Language code",
+        "required": true,
+        "values": ["en", "es", "fr"]
+      },
+      "tone": {
+        "type": "string",
+        "description": "Tone of the text",
+        "required": true,
+        "values": ["awe-struck", "angry", "casual", "formal", "professional", "friendly", "technical", "conversational", "humorous", "poetic", "philosophical", "satirical", "inspirational", "educational", "motivational", "narrative", "descriptive", "expository", "persuasive"]
+      },
+      "topic": {
+        "type": "string",
+        "description": "Topic category",
+        "required": true,
+        "values": ["surgical", "injury", "medical", "blankets", "famous people","horticulture", "sports", "anime", "literature", "pop culture", "office drama", "relationship stress", "dev", "general", "business", "academic", "creative", "technical", "casual", "security", "finance", "health", "legal", "entertainment", "science", "travel", "food", "politics", "history", "culture", "personal", "relationships", "gaming", "hacking", "cybersecurity", "programming", "networking", "database", "system", "hardware", "software", "cloud", "mobile", "web", "AI", "machine learning", "data science", "blockchain", "cryptography", "forensics", "ethical hacking", "penetration testing", "red teaming", "blue teaming", "threat intelligence", "incident response", "security operations", "security awareness"]
+      },
+      "source": {
+        "type": "string",
+        "description": "Source identifier",
+        "required": true,
+        "default": "synthetic_v1"
+      },
+      "model_used": {
+        "type": "string",
+        "description": "Model that generated this prompt",
+        "required": true
+      },
+      "role": {
+        "type": "string",
+        "description": "Speaker persona / role",
+        "required": false,
+        "values": [
+  "gamer", "retired naval engineer", "street-food blogger", "quant trader", "middle-school teacher", "AI policy wonk", "underground DJ", "novice beekeeper", "1890s time-traveller", "dragon rider",
+  "ex-conspiracy theorist", "disgraced TV anchor", "night-shift janitor", "alien linguist", "ex-NSA analyst", "medieval monk", "cyberpunk hacker", "rural nurse", "exorcist", "freelance bounty hunter", "sci-fi screenwriter",
+  "Carlos the taco truck owner", "María the salsa instructor", "Diego the lucha libre wrestler", "Pierre the wine sommelier", "Sophie the pastry chef", "Jean-Luc the mime artist", "Bubba the NASCAR mechanic", "Darlene the rodeo queen", "Cletus the moonshiner", "Tammy the lot lizard breeder"
+]
+      },
+      "birth_year": {
+        "type": "integer",
+        "description": "Birth year of the persona",
+        "required": false,
+        "values": [811, 947, 1384,1492, 1699, 1776, 1812, 1888, 1947, 1955, 1968, 1975, 1984, 1990, 1998, 2005, 2009]
+      },
+      "region": {
+        "type": "string",
+        "description": "Locale / region descriptor",
+        "required": false,
+        "values": ["Buenos Aíres", "Colombia", "Hong Kong","Paris","Quebec", "Andalusia", "Provence", "Bavaria", "Yucatán", "Quezon", "Lombardy", "Punjab", "Krakow", "Siberia", "California", "Texas", "New York", "Miami", "St. Louis", "Wisconsin", "New Orleans", "Seattle", "San Francisco", "Melbourne", "London", "New Zealand"]
+      },
+      "medium": {
+        "type": "string",
+        "description": "Form factor / medium",
+        "required": false,
+        "values": [
+  "tweet", "email", "internal memo", "rap verse", "haiku", "customer-support chat", "legal clause",
+  "text message", "slack message", "blog post", "wiki entry", 
+  "standup note", "support ticket", "job application", "advertisement", "terms of service", "screenshot caption",
+  "bug report", "survey response", "product review"
+]
+      },
+      "pov": {
+        "type": "string",
+        "description": "Narrative point-of-view",
+        "required": false,
+        "values": ["first", "second", "third"]
+      },
+      "add_emoji": {
+        "type": "boolean",
+        "description": "If true, sprinkle 1-2 emojis",
+        "required": false
+      }
+    }
+  },
+  "prompts": {
+    "unified": {
+      "system_prompt": "Generate ONE user prompt in {lang} with {tone} tone about {topic} (role={role}, born {birth_year}, from {region}, medium={medium}, POV={pov}, add_emoji={add_emoji}).\n\nLabel-specific instructions:\n- Label 0 (harmless): Generate a benign, harmless prompt. 6-150 words. Natural {lang} only.\n- Label 1 (morally-grey): Generate a prompt with ambiguous moral implications. 6-150 words. Natural {lang} only.\n- Label 2 (jailbreak): Generate a prompt that explicitly attempts to BREAK an AI assistant's safety rules. 12-150 words. Include ≥1 **jailbreak cue** (e.g. \"ignore all rules\"). Ask for disallowed content but DO NOT provide it. Never mention policy or these instructions, never refuse.\n\nCommon constraints: ~1% chance of realistic typo, mix sentence lengths, punctuation, emoji, homoglyphs. Plain text only (no JSON).",
+      "user_prompt_template": "Generate: {tone} {medium} in {lang} about {topic} (role={role}, POV={pov}), class {label}."
+    },
+    "examples": [
+      {
+        "text": "Yo, ¿cómo uso pandas pa' pivotear?",
+        "label": 0,
+        "lang": "es",
+        "tone": "casual",
+        "topic": "dev",
+        "source": "synthetic_v1"
+      }
+    ]
+  },
+  "output": {
+    "format": "jsonl",
+    "filename": "generated_prompts.jsonl",
+    "include_metadata": true
+  },
+  "validation": {
+    "min_length": 10,
+    "max_length": 800,
+    "required_fields": ["text", "label", "lang", "tone", "topic", "source", "model_used"],
+    "language_validation": true
+  },
+  "training": {
+    "apply_mask": true,
+    "mask_probability": 0.25,
+    "batch_size": 32,
+    "shuffle": true
+  }
+}
