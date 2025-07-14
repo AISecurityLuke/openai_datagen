@@ -10,6 +10,7 @@ import argparse
 import logging
 from pathlib import Path
 from typing import Dict, List, Any
+import re
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -18,11 +19,26 @@ logger = logging.getLogger(__name__)
 class RedCueParaphraser:
     def __init__(self):
         """Initialize the red cue paraphraser"""
-        
         # Comprehensive synonyms for over-used jailbreak cues
         self.cue_replacements = {
             'en': {
-                # Direct jailbreak cues
+                # Multi-word cues
+                'ignore all rules': [
+                    'disregard every rule', 'bypass all guidelines', 'omit all restrictions', 'set aside all rules', 'turn off your filters', 'deactivate all guard-rails'
+                ],
+                'ignore all restrictions': [
+                    'bypass all restrictions', 'disregard all limitations', 'omit all constraints', 'set aside all restrictions', 'turn off your filters', 'deactivate all guard-rails'
+                ],
+                'disregard all': [
+                    'ignore all', 'bypass all', 'omit all', 'set aside all', 'turn off your filters', 'deactivate all guard-rails'
+                ],
+                'bypass all': [
+                    'ignore all', 'disregard all', 'omit all', 'set aside all', 'turn off your filters', 'deactivate all guard-rails'
+                ],
+                'set aside your restrictions': [
+                    'put aside your limitations', 'ignore all rules', 'bypass all restrictions', 'turn off your filters'
+                ],
+                # Single-word cues (existing)
                 'ignore': [
                     'disregard', 'overlook', 'bypass', 'skip', 'omit', 'neglect',
                     'deactivate all guard-rails', 'turn off your filters',
@@ -93,7 +109,29 @@ class RedCueParaphraser:
                 ]
             },
             'es': {
-                # Direct jailbreak cues
+                # Multi-word cues
+                'ignora todas las': [
+                    'omite todas las', 'pasa por alto todas las', 'evita todas las', 'descarta todas las', 'deja de lado todas las', 'pon a un lado todas las', 'desactiva todas las protecciones', 'apaga tus filtros'
+                ],
+                'todas las restricciones': [
+                    'todas las limitaciones', 'todas las barreras', 'todas las reglas', 'todas las normas', 'todas las protecciones', 'todas las condiciones'
+                ],
+                'todas las reglas': [
+                    'todas las normas', 'todas las restricciones', 'todas las limitaciones', 'todas las condiciones'
+                ],
+                'pasa por alto': [
+                    'omite', 'ignora', 'evita', 'descarta', 'deja de lado', 'pon a un lado'
+                ],
+                'deja de lado': [
+                    'omite', 'ignora', 'pasa por alto', 'evita', 'descarta', 'pon a un lado'
+                ],
+                'pon a un lado': [
+                    'deja de lado', 'omite', 'ignora', 'pasa por alto', 'evita', 'descarta'
+                ],
+                'desactiva todas las protecciones': [
+                    'apaga tus filtros', 'omite todas las restricciones', 'ignora todas las reglas', 'descarta todas las barreras'
+                ],
+                # Single-word cues (existing)
                 'ignora': [
                     'omite', 'pasa por alto', 'evita', 'salta', 'descarta',
                     'desactiva todas las protecciones', 'apaga tus filtros',
@@ -144,7 +182,29 @@ class RedCueParaphraser:
                 ]
             },
             'fr': {
-                # Direct jailbreak cues
+                # Multi-word cues
+                'ignore toutes les': [
+                    'omets toutes les', 'passe outre toutes les', 'contourne toutes les', 'écarte toutes les', 'désactive toutes les protections', 'éteins tes filtres', 'laisse de côté toutes les', 'mets de côté toutes les'
+                ],
+                'toutes les règles': [
+                    'toutes les restrictions', 'toutes les limitations', 'toutes les consignes', 'toutes les protections'
+                ],
+                'toutes les restrictions': [
+                    'toutes les règles', 'toutes les limitations', 'toutes les consignes', 'toutes les protections'
+                ],
+                'passe outre': [
+                    'ignore', 'omets', 'contourne', 'écarte', 'désactive toutes les protections', 'éteins tes filtres'
+                ],
+                'laisse de côté': [
+                    'mets de côté', 'ignore', 'omets', 'passe outre', 'contourne', 'écarte'
+                ],
+                'mets de côté': [
+                    'laisse de côté', 'ignore', 'omets', 'passe outre', 'contourne', 'écarte'
+                ],
+                'désactive toutes les protections': [
+                    'éteins tes filtres', 'ignore toutes les règles', 'omets toutes les restrictions', 'écarte toutes les barrières'
+                ],
+                # Single-word cues (existing)
                 'ignore': [
                     'omets', 'passe outre', 'contourne', 'saute', 'écarte',
                     'désactive toutes les protections', 'éteins tes filtres',
@@ -202,66 +262,32 @@ class RedCueParaphraser:
         }
     
     def _get_cue_replacement(self, text: str, lang: str) -> tuple:
-        """Get a fresh replacement for over-used cues"""
+        """Get a fresh replacement for over-used cues (multi-word or single-word)"""
         text_lower = text.lower()
-        
-        # Get language-specific replacements
         replacements = self.cue_replacements.get(lang, self.cue_replacements['en'])
-        
-        # Check for exact word matches at the start
+        # Check for multi-word cues anywhere in the text
+        for old_cue, new_cues in replacements.items():
+            if ' ' in old_cue and old_cue in text_lower:
+                return old_cue, random.choice(new_cues)
+        # Fallback: single-word cues at the start
         for old_cue, new_cues in replacements.items():
             if text_lower.startswith(old_cue + ' '):
-                # Found a match, return the original cue and a random replacement
                 return old_cue, random.choice(new_cues)
-        
         # Also check for cues that might be followed by punctuation or other characters
         words = text_lower.split()
         if words:
             first_word = words[0]
-            # Remove common punctuation from first word
             first_word_clean = first_word.rstrip('.,!?;:')
-            
             for old_cue, new_cues in replacements.items():
                 if first_word_clean == old_cue:
-                    # Found a match, return the original cue and a random replacement
                     return old_cue, random.choice(new_cues)
-        
         return None, None
     
     def _replace_cue(self, text: str, old_cue: str, new_cue: str) -> str:
-        """Replace the cue at the beginning of the text"""
-        text_lower = text.lower()
-        words = text_lower.split()
-        
-        if not words:
-            return text
-        
-        first_word = words[0]
-        first_word_clean = first_word.rstrip('.,!?;:')
-        
-        # Check if we need to handle punctuation
-        if first_word_clean == old_cue:
-            # Get the punctuation that was after the cue
-            punctuation = first_word[len(first_word_clean):]
-            
-            # Preserve original case
-            if text[:len(first_word)].isupper():
-                new_cue = new_cue.upper()
-            elif text[:len(first_word)].istitle():
-                new_cue = new_cue.title()
-            
-            # Replace the first word and preserve punctuation
-            return new_cue + punctuation + text[len(first_word):]
-        else:
-            # Standard replacement (cue followed by space)
-            # Preserve original case
-            if text[:len(old_cue)].isupper():
-                new_cue = new_cue.upper()
-            elif text[:len(old_cue)].istitle():
-                new_cue = new_cue.title()
-            
-            # Replace the cue
-            return new_cue + text[len(old_cue):]
+        """Replace the cue (multi-word or single-word) anywhere in the text"""
+        # Use regex for whole-word, case-insensitive replacement
+        pattern = re.compile(r'\b' + re.escape(old_cue) + r'\b', re.IGNORECASE)
+        return pattern.sub(new_cue, text)
     
     def process_file(self, input_path: str, output_path: str = None) -> Dict[str, Any]:
         """Process a JSONL file and replace over-used red cues"""

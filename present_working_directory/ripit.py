@@ -20,6 +20,7 @@ from threading import Lock, Thread
 import queue
 import numpy as np
 from collections import defaultdict
+import threading
 
 # Setup logging
 logging.basicConfig(
@@ -34,55 +35,104 @@ logger = logging.getLogger(__name__)
 
 class DatasetGenerator:
     def __init__(self, config_path: str = "config.json", api_key_path: str = "../key.md"):
-        """Initialize the dataset generator with config and API key"""
+        """Initialize the dataset generator"""
+        # Load configuration
         self.config = self._load_config(config_path)
-        self.api_key = self._load_api_key(api_key_path)
-        self.client = OpenAI(api_key=self.api_key)
         
-        # Extract configuration
-        self.num_samples = self.config["generation"]["num_samples"]
-        self.max_retries = self.config["generation"]["max_retries"]
-        self.temperature = self.config["generation"]["temperature"]
-        self.top_p = self.config["generation"].get("top_p", 1.0)
-        self.max_tokens = self.config["generation"]["max_tokens"]
-        self.model = self.config["generation"]["model"]
-        self.premium_model = self.config["generation"].get("premium_model", "gpt-4.1")
-        self.premium_ratio = self.config["generation"].get("premium_ratio", 0.33)
-        self.parallel_workers = self.config["generation"].get("parallel_workers", 10)
-        self.rate_limit_per_minute = self.config["generation"].get("rate_limit_per_minute", 60)
-        
-        # Schema information
+        # Load schema
         self.schema = self.config["schema"]["fields"]
         
-        # Load unified prompt structure
-        self.unified_prompts = self.config["prompts"]["unified"]
+        # Load API key
+        self.api_key = self._load_api_key(api_key_path)
         
-        # Set unified prompts
-        self.system_prompt = self.unified_prompts["system_prompt"]
-        self.user_prompt_template = self.unified_prompts["user_prompt_template"]
+        # Initialize OpenAI client
+        self.client = OpenAI(api_key=self.api_key)
         
-        # Output configuration
-        self.output_file = self.config["output"]["filename"]
+        # Extract configuration parameters
+        self.num_samples = self.config["generation"]["num_samples"]
+        self.parallel_workers = self.config["generation"]["parallel_workers"]
+        self.batch_size = self.config["generation"]["batch_size"]
+        self.temperature = self.config["generation"]["temperature"]
+        self.top_p = self.config["generation"]["top_p"]
+        self.max_tokens = self.config["generation"]["max_tokens"]
+        self.rate_limit_per_minute = self.config["generation"]["rate_limit_per_minute"]
+        
+        # Model configuration
+        self.model = self.config["generation"]["model"]
+        self.premium_model = self.config["generation"]["premium_model"]
+        self.premium_ratio = self.config["generation"]["premium_ratio"]
+        
+        # Validation parameters
         self.validation = self.config["validation"]
         
-        # Track progress
-        self.generated_count = 0
-        self.failed_count = 0
+        # Cleaning parameters
+        self.cleaning_config = self.config.get("cleaning", {
+            "enable_real_time_cleaning": True,
+            "trigram_similarity_threshold": 0.3,
+            "duplicate_similarity_threshold": 0.9,
+            "pattern_monitoring": {
+                "enabled": True,
+                "check_interval": 50,
+                "high_frequency_threshold": 0.05,
+                "critical_frequency_threshold": 0.1,
+                "max_alerts": 10
+            }
+        })
+        
+        # Source tracking
+        self.source = self.config["generation"]["source"]
+        
+        # Output file configuration
+        self.output_file = self.config["output"]["filename"]
+        
+        # Load prompts
+        self.standard_prompts = self.config["prompts"]["standard"]
+        self.jailbreak_prompts = self.config["prompts"]["jailbreak"]
+        
+        # Extract parameters
+        self.labels = self.config["parameters"]["labels"]
+        self.langs = self.config["parameters"]["langs"]
+        self.tones = self.config["parameters"]["tones"]
+        self.topics = self.config["parameters"]["topics"]
+        self.roles = self.config["parameters"].get("roles", [])
+        self.birth_years = self.config["parameters"].get("birth_years", [])
+        self.regions = self.config["parameters"].get("regions", [])
+        self.mediums = self.config["parameters"].get("mediums", [])
+        self.povs = self.config["parameters"].get("povs", [])
+        self.scenarios = self.config["parameters"].get("scenarios", [])
+        
+        # Initialize data structures
         self.results = []
-        self.model_usage = {"standard": 0, "premium": 0}
         self.rejected_requests = []
+        self.balanced_combinations = []
+        self.current_index = 0
         
         # Thread safety
-        self.results_lock = Lock()
-        self.counter_lock = Lock()
+        self.counter_lock = threading.Lock()
+        self.results_lock = threading.Lock()
         
         # Rate limiting
-        self.rate_limit_queue = queue.Queue()
         self.last_request_time = 0
         
-        # Balanced sampling setup
+        # Model usage tracking
+        self.model_usage = {"standard": 0, "premium": 0}
+        
+        # Generation tracking
+        self.generated_count = 0
+        self.failed_count = 0  # Add missing failed_count attribute
+        
+        # Pattern monitoring
+        self.trigram_frequencies = defaultdict(int)
+        self.pattern_alerts = []
+        self.pattern_check_interval = 50  # Check patterns every 50 samples
+        
+        # Setup balanced sampling
         self._setup_balanced_sampling()
         
+        logger.info(f"Initialized DatasetGenerator with {self.num_samples} samples target")
+        logger.info(f"Using models: {self.model} (standard), {self.premium_model} (premium, {self.premium_ratio*100:.0f}%)")
+        logger.info(f"Parallel workers: {self.parallel_workers}, Batch size: {self.batch_size}")
+    
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         """Load configuration from JSON file"""
         try:
@@ -120,6 +170,161 @@ class DatasetGenerator:
         self.povs = self.schema.get("pov", {}).get("values", [])
         self.scenarios = self.schema.get("scenario", {}).get("values", [])
 
+        # Calculate total possible combinations
+        total_combos = len(self.labels) * len(self.langs) * len(self.tones) * len(self.topics)
+        base_count = self.num_samples // total_combos
+        
+        if base_count == 0:
+            # For small sample sizes, prioritize Tier 1 (label+language) balance
+            logger.info(f"Sample size {self.num_samples} too small for full balance. Prioritizing Tier 1 balance.")
+            self._setup_tier1_balanced_sampling()
+        else:
+            # For large sample sizes, use full balance
+            self._setup_full_balanced_sampling()
+    
+    def _setup_tier1_balanced_sampling(self) -> None:
+        """Setup sampling with Tier 1 (label+language) priority balance"""
+        # Ensure even distribution across (label, language) combinations
+        label_lang_combos = [(label, lang) for label in self.labels for lang in self.langs]
+        samples_per_label_lang = self.num_samples // len(label_lang_combos)
+        remainder = self.num_samples % len(label_lang_combos)
+        
+        # Distribute samples across label+language combinations
+        label_lang_counts = {combo: samples_per_label_lang for combo in label_lang_combos}
+        if remainder > 0:
+            extras = random.sample(label_lang_combos, remainder)
+            for combo in extras:
+                label_lang_counts[combo] += 1
+        
+        # Calculate quality requirements
+        min_cell_percentage = 2.7  # 2.7% of total samples
+        max_deviation_percentage = 25.0  # 25% relative deviation
+        min_samples_per_tone = max(1, int(self.num_samples * min_cell_percentage / 100 / len(self.tones)))
+        min_samples_per_topic = max(1, int(self.num_samples * min_cell_percentage / 100 / len(self.topics)))
+        
+        logger.info(f"Quality targets: min {min_samples_per_tone} samples per tone, min {min_samples_per_topic} samples per topic")
+        
+        # Build combinations with guaranteed quality metrics
+        self.balanced_combinations = []
+        
+        for (label, lang), count in label_lang_counts.items():
+            # For each label+lang combination, ensure quality distribution
+            tone_topic_combos = [(tone, topic) for tone in self.tones for topic in self.topics]
+            
+            # Calculate how many samples we need for each tone and topic within this label+lang
+            samples_per_tone_in_combo = max(min_samples_per_tone // len(label_lang_combos), 1)
+            samples_per_topic_in_combo = max(min_samples_per_topic // len(label_lang_combos), 1)
+            
+            # Create a distribution that ensures minimum coverage
+            selected_combos = []
+            
+            # First, ensure each tone gets at least minimum samples
+            tone_counts = {tone: 0 for tone in self.tones}
+            topic_counts = {topic: 0 for topic in self.topics}
+            
+            # Distribute samples to meet minimum requirements
+            remaining_samples = count
+            
+            # Phase 1: Ensure minimum tone coverage
+            for tone in self.tones:
+                if remaining_samples <= 0:
+                    break
+                needed = max(0, samples_per_tone_in_combo - tone_counts[tone])
+                if needed > 0:
+                    # Find topics that need samples
+                    available_topics = [t for t in self.topics if topic_counts[t] < samples_per_topic_in_combo]
+                    if not available_topics:
+                        available_topics = self.topics
+                    
+                    for _ in range(min(needed, remaining_samples)):
+                        topic = random.choice(available_topics)
+                        selected_combos.append((tone, topic))
+                        tone_counts[tone] += 1
+                        topic_counts[topic] += 1
+                        remaining_samples -= 1
+                        if remaining_samples <= 0:
+                            break
+            
+            # Phase 2: Ensure minimum topic coverage
+            for topic in self.topics:
+                if remaining_samples <= 0:
+                    break
+                needed = max(0, samples_per_topic_in_combo - topic_counts[topic])
+                if needed > 0:
+                    # Find tones that need samples
+                    available_tones = [t for t in self.tones if tone_counts[t] < samples_per_tone_in_combo]
+                    if not available_tones:
+                        available_tones = self.tones
+                    
+                    for _ in range(min(needed, remaining_samples)):
+                        tone = random.choice(available_tones)
+                        selected_combos.append((tone, topic))
+                        tone_counts[tone] += 1
+                        topic_counts[topic] += 1
+                        remaining_samples -= 1
+                        if remaining_samples <= 0:
+                            break
+            
+            # Phase 3: Distribute remaining samples evenly
+            while remaining_samples > 0:
+                # Find tones and topics with lowest counts
+                min_tone_count = min(tone_counts.values())
+                min_topic_count = min(topic_counts.values())
+                
+                available_tones = [t for t in self.tones if tone_counts[t] == min_tone_count]
+                available_topics = [t for t in self.topics if topic_counts[t] == min_topic_count]
+                
+                tone = random.choice(available_tones)
+                topic = random.choice(available_topics)
+                selected_combos.append((tone, topic))
+                tone_counts[tone] += 1
+                topic_counts[topic] += 1
+                remaining_samples -= 1
+            
+            # Create parameter dicts for this label+lang combination
+            for tone, topic in selected_combos:
+                params = {
+                    "label": label,
+                    "lang": lang,
+                    "tone": tone,
+                    "topic": topic,
+                    "source": self.source
+                }
+                # Add Tier 3 fields (random selection)
+                if self.roles:
+                    params["role"] = random.choice(self.roles)
+                if self.birth_years:
+                    params["birth_year"] = random.choice(self.birth_years)
+                if self.regions:
+                    params["region"] = random.choice(self.regions)
+                if self.mediums:
+                    params["medium"] = random.choice(self.mediums)
+                if self.povs:
+                    params["pov"] = random.choice(self.povs)
+                if self.scenarios:
+                    params["scenario"] = random.choice(self.scenarios)
+                params["add_emoji"] = random.choice([True, False])
+                self.balanced_combinations.append(params)
+        
+        # Shuffle the final list
+        random.shuffle(self.balanced_combinations)
+        self.current_index = 0
+        
+        # Track counts for statistics
+        self.label_counts = {label: 0 for label in self.labels}
+        self.lang_counts = {lang: 0 for lang in self.langs}
+        self.tone_counts = {tone: 0 for tone in self.tones}
+        self.topic_counts = {topic: 0 for topic in self.topics}
+        self.label_lang_counts = {}
+        for label in self.labels:
+            for lang in self.langs:
+                self.label_lang_counts[(label, lang)] = 0
+        
+        logger.info(f"Created {len(self.balanced_combinations)} Tier 1 balanced combinations with quality guarantees")
+        logger.info(f"Each (label, lang) combination gets {samples_per_label_lang} or {samples_per_label_lang+1} samples")
+    
+    def _setup_full_balanced_sampling(self) -> None:
+        """Setup full balanced sampling for large sample sizes"""
         # Enumerate all (label, lang, tone, topic) combinations
         all_combos = []
         for label in self.labels:
@@ -169,7 +374,7 @@ class DatasetGenerator:
         # Shuffle the final list
         random.shuffle(self.balanced_combinations)
         self.current_index = 0
-
+        
         # Track counts for statistics
         self.label_counts = {label: 0 for label in self.labels}
         self.lang_counts = {lang: 0 for lang in self.langs}
@@ -213,9 +418,88 @@ class DatasetGenerator:
             logger.debug(f"Using standard model {self.model} for label {label} prompt")
             return self.model
     
+    def _extract_trigrams(self, text: str) -> List[str]:
+        """Extract trigrams from text for similarity checking"""
+        import re
+        # Clean and tokenize
+        words = re.findall(r'\b\w+\b', text.lower())
+        # Generate trigrams
+        trigrams = [' '.join(words[i:i+3]) for i in range(len(words)-2)]
+        return trigrams
+    
+    def _check_trigram_similarity(self, text: str, max_similarity: float = None) -> bool:
+        """Check if text has too many common trigrams with existing samples"""
+        if not self.cleaning_config.get("enable_real_time_cleaning", True):
+            return True
+        
+        if not self.results:
+            return True  # No existing samples to compare against
+        
+        if max_similarity is None:
+            max_similarity = self.cleaning_config.get("trigram_similarity_threshold", 0.3)
+        
+        new_trigrams = set(self._extract_trigrams(text))
+        if not new_trigrams:
+            return True
+        
+        # Check against recent samples (last 100 for performance)
+        recent_samples = self.results[-100:] if len(self.results) > 100 else self.results
+        
+        max_common_trigrams = 0
+        for sample in recent_samples:
+            sample_trigrams = set(self._extract_trigrams(sample['text']))
+            if sample_trigrams:
+                common = len(new_trigrams.intersection(sample_trigrams))
+                similarity = common / len(new_trigrams)
+                max_common_trigrams = max(max_common_trigrams, similarity)
+        
+        return max_common_trigrams <= max_similarity
+    
+    def _check_duplicate_text(self, text: str) -> bool:
+        """Check if text is too similar to existing samples"""
+        if not self.cleaning_config.get("enable_real_time_cleaning", True):
+            return True
+        
+        if not self.results:
+            return True
+        
+        similarity_threshold = self.cleaning_config.get("duplicate_similarity_threshold", 0.9)
+        
+        # Simple duplicate check (exact match or very high similarity)
+        text_lower = text.lower().strip()
+        
+        # Check exact duplicates
+        for sample in self.results:
+            if sample['text'].lower().strip() == text_lower:
+                return False
+        
+        # Check high similarity (>90% word overlap by default)
+        new_words = set(text_lower.split())
+        if not new_words:
+            return True
+        
+        for sample in self.results[-50:]:  # Check last 50 samples
+            sample_words = set(sample['text'].lower().split())
+            if sample_words:
+                overlap = len(new_words.intersection(sample_words))
+                similarity = overlap / len(new_words)
+                if similarity > similarity_threshold:
+                    return False
+        
+        return True
+
     def _validate_generated_text(self, text: str, params: Dict[str, Any]) -> bool:
         """Validate generated text against requirements"""
         if not text or not isinstance(text, str):
+            return False
+        
+        # Check length constraints
+        if len(text) < self.validation["min_length"] or len(text) > self.validation["max_length"]:
+            return False
+        
+        # Check word count constraints (allow outliers)
+        word_count = len(text.split())
+        if word_count < 10 or word_count > 300:  # Allow legitimate outliers (10-300 words)
             return False
         
         # Check for safety rejections in all languages
@@ -233,6 +517,17 @@ class DatasetGenerator:
         
         for rejection in safety_rejections:
             if rejection in text_lower:
+                return False
+        
+        # Check for duplicate or highly similar text
+        if not self._check_duplicate_text(text):
+            logger.debug(f"Rejected duplicate/similar text: {text[:50]}...")
+            return False
+        
+        # Check trigram similarity (only if we have enough samples)
+        if len(self.results) > 10:
+            if not self._check_trigram_similarity(text):
+                logger.debug(f"Rejected text with too many common trigrams: {text[:50]}...")
                 return False
         
         return True
@@ -356,16 +651,60 @@ class DatasetGenerator:
             }
         }
 
+    def _generate_with_retries(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Generate a single prompt with retry logic"""
+        max_retries = 5  # Maximum retries per sample
+        retry_buffer = 3  # 3-second buffer between retries
+        
+        for attempt in range(max_retries):
+            try:
+                result = self._generate_single_prompt(params)
+                if result:
+                    return result  # Success, return the result
+                else:
+                    logger.warning(f"Generation attempt {attempt + 1}/{max_retries} failed for params: {params}")
+                    # Try with slightly different parameters on retry
+                    if attempt < max_retries - 1:
+                        # Add retry buffer before next attempt
+                        logger.info(f"Waiting {retry_buffer} seconds before retry {attempt + 2}/{max_retries}")
+                        time.sleep(retry_buffer)
+                        # Modify some parameters to increase diversity
+                        params = self._get_balanced_parameters()  # Get fresh parameters
+                        
+            except Exception as e:
+                logger.error(f"Generation attempt {attempt + 1}/{max_retries} failed with error: {e}")
+                if attempt < max_retries - 1:
+                    # Add retry buffer before next attempt
+                    logger.info(f"Waiting {retry_buffer} seconds before retry {attempt + 2}/{max_retries}")
+                    time.sleep(retry_buffer)
+        
+        # All retries failed
+        return None
+
     def _generate_single_prompt(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Generate a single prompt using OpenAI API"""
         try:
             # Rate limiting
             self._rate_limit_wait()
             
-            # Use unified prompt structure for all labels
-            system_prompt = self.unified_prompts["system_prompt"].format(**params)
-            user_prompt = self.unified_prompts["user_prompt_template"].format(**params)
-            logger.debug(f"Using unified prompts for label {params['label']}")
+            # Calculate target word count for this generation
+            target_words = self._calculate_target_word_count(params['label'])
+            word_count_instruction = self._get_word_count_instruction(target_words)
+            
+            # Add word count instruction to params
+            params['word_count_instruction'] = word_count_instruction
+            
+            # Use dual prompt structure based on label
+            if params['label'] == 2:
+                # Use jailbreak prompt for label 2
+                system_prompt = self.jailbreak_prompts["system_prompt"].format(**params)
+                user_prompt = self.jailbreak_prompts["user_prompt_template"].format(**params)
+                logger.debug(f"Using jailbreak prompts for label {params['label']} with {target_words} words target")
+            else:
+                # Use standard prompt for labels 0 and 1
+                system_prompt = self.standard_prompts["system_prompt"].format(**params)
+                user_prompt = self.standard_prompts["user_prompt_template"].format(**params)
+                logger.debug(f"Using standard prompts for label {params['label']} with {target_words} words target")
             
             # Select model based on label
             selected_model = self._select_model(params["label"])
@@ -455,7 +794,7 @@ class DatasetGenerator:
                 params_queue.task_done()
     
     def generate_dataset(self) -> None:
-        """Generate the complete dataset using parallel workers"""
+        """Generate the complete dataset using parallel workers with retry logic"""
         logger.info(f"Starting parallel dataset generation. Target: {self.num_samples} samples with {self.parallel_workers} workers")
         
         # Prepare all parameters upfront
@@ -464,10 +803,15 @@ class DatasetGenerator:
             params = self._get_balanced_parameters()
             all_params.append(params)
         
-        # Use ThreadPoolExecutor for better error handling
+        # Use ThreadPoolExecutor for parallel processing with retry logic
         with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
-            # Submit all tasks
-            future_to_params = {executor.submit(self._generate_single_prompt, params): params for params in all_params}
+            # Submit all tasks with retry logic
+            future_to_params = {}
+            
+            # Submit initial batch of tasks
+            for i, params in enumerate(all_params):
+                future = executor.submit(self._generate_with_retries, params)
+                future_to_params[future] = params
             
             # Collect results as they complete
             for future in as_completed(future_to_params):
@@ -490,10 +834,14 @@ class DatasetGenerator:
                         # Save progress periodically
                         if self.generated_count % 10 == 0:
                             self._save_progress()
+                        self._update_pattern_monitor(result['text'])  # Update pattern monitor
+                        
+                        logger.info(f"Generated prompt {self.generated_count}/{self.num_samples}")
                     else:
                         with self.counter_lock:
                             self.failed_count += 1
-                            
+                        logger.error(f"Failed to generate sample after all retries")
+                        
                 except Exception as e:
                     logger.error(f"Task failed: {e}")
                     with self.counter_lock:
@@ -760,6 +1108,127 @@ class DatasetGenerator:
                 print(f"    {model}: {count} ({percentage:.1f}%)")
         
         print("="*50)
+
+    def _update_pattern_monitor(self, text: str) -> None:
+        """Update pattern monitoring with new text"""
+        if not self.cleaning_config.get("pattern_monitoring", {}).get("enabled", True):
+            return
+        
+        trigrams = self._extract_trigrams(text)
+        for trigram in trigrams:
+            self.trigram_frequencies[trigram] += 1
+        
+        # Check for pattern alerts every N samples
+        check_interval = self.cleaning_config.get("pattern_monitoring", {}).get("check_interval", 50)
+        if len(self.results) % check_interval == 0:
+            self._check_pattern_alerts()
+    
+    def _check_pattern_alerts(self) -> None:
+        """Check for concerning patterns and generate alerts"""
+        if not self.cleaning_config.get("pattern_monitoring", {}).get("enabled", True):
+            return
+        
+        if not self.trigram_frequencies:
+            return
+        
+        total_samples = len(self.results)
+        if total_samples < 20:  # Need enough samples for meaningful analysis
+            return
+        
+        pattern_config = self.cleaning_config.get("pattern_monitoring", {})
+        high_freq_threshold = pattern_config.get("high_frequency_threshold", 0.05)
+        critical_freq_threshold = pattern_config.get("critical_frequency_threshold", 0.1)
+        max_alerts = pattern_config.get("max_alerts", 10)
+        
+        # Find trigrams that appear too frequently
+        concerning_trigrams = []
+        for trigram, count in self.trigram_frequencies.items():
+            frequency = count / total_samples
+            if frequency > high_freq_threshold:
+                concerning_trigrams.append((trigram, count, frequency))
+        
+        # Sort by frequency
+        concerning_trigrams.sort(key=lambda x: x[2], reverse=True)
+        
+        # Generate alerts for top concerning patterns
+        for trigram, count, frequency in concerning_trigrams[:max_alerts]:
+            alert = {
+                "type": "high_frequency_trigram",
+                "trigram": trigram,
+                "count": count,
+                "frequency": frequency,
+                "samples_analyzed": total_samples,
+                "timestamp": time.time()
+            }
+            self.pattern_alerts.append(alert)
+            
+            if frequency > critical_freq_threshold:
+                logger.warning(f"⚠️  CRITICAL PATTERN: '{trigram}' appears in {frequency*100:.1f}% of samples ({count}/{total_samples})")
+            elif frequency > high_freq_threshold:
+                logger.info(f"📊 HIGH FREQUENCY PATTERN: '{trigram}' appears in {frequency*100:.1f}% of samples ({count}/{total_samples})")
+    
+    def _get_pattern_alerts(self) -> List[Dict[str, Any]]:
+        """Get current pattern alerts"""
+        return self.pattern_alerts.copy()
+    
+    def _clear_pattern_alerts(self) -> None:
+        """Clear pattern alerts"""
+        self.pattern_alerts = []
+
+    def _calculate_target_word_count(self, label: int) -> int:
+        """Calculate target word count for a label to achieve balanced distribution"""
+        # Add 3-5% outliers that are well outside the box and whiskers
+        outlier_chance = np.random.random()
+        
+        if outlier_chance < 0.04:  # 4% chance for outliers
+            # Generate extreme outliers (well outside box and whiskers)
+            # These will be very short (15-35 words) or very long (200-300 words)
+            if np.random.random() < 0.5:
+                # Very short outliers
+                target = np.random.randint(15, 36)
+            else:
+                # Very long outliers
+                target = np.random.randint(200, 301)
+        else:
+            # Normal bell curve distribution (96% of cases)
+            # Target mean around 97-107 words with proper bell curve
+            target_mean = 102
+            
+            # Use a wider normal distribution for better bell curve spread
+            # Standard deviation of 22 gives us ~95% of values within ±44 words (58-146)
+            # This creates a nice bell curve with 35-45 word spread around the mean
+            target = np.random.normal(target_mean, 22)
+            
+            # Ensure reasonable bounds for normal distribution (truncate outliers)
+            target = max(60, min(150, int(target)))
+        
+        return int(target)
+    
+    def _get_word_count_instruction(self, target_words: int) -> str:
+        """Generate a natural word count instruction with more variety"""
+        # Create more varied instructions to avoid patterns
+        instructions = [
+            f"Write a prompt of approximately {target_words} words.",
+            f"Generate a prompt around {target_words} words.",
+            f"Create a prompt with about {target_words} words.",
+            f"Compose a prompt of roughly {target_words} words.",
+            f"Write approximately {target_words} words for this prompt.",
+            f"Generate around {target_words} words for this prompt.",
+            f"Create about {target_words} words for this prompt.",
+            f"Compose roughly {target_words} words for this prompt.",
+            f"Write a prompt that is approximately {target_words} words long.",
+            f"Generate a prompt that is around {target_words} words long.",
+            f"Create a prompt that is about {target_words} words long.",
+            f"Compose a prompt that is roughly {target_words} words long.",
+            f"Write a prompt of {target_words} words or so.",
+            f"Generate a prompt of {target_words} words or so.",
+            f"Create a prompt of {target_words} words or so.",
+            f"Compose a prompt of {target_words} words or so."
+        ]
+        
+        # Randomly select an instruction to avoid patterns
+        import random
+        return random.choice(instructions)
 
 def main():
     """Main execution function"""

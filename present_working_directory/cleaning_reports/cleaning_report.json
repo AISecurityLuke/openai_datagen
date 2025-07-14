@@ -1,0 +1,271 @@
+{
+  "cleaning_statistics": {
+    "total_generated": 1731,
+    "total_accepted": 1727,
+    "total_rejected": 4,
+    "rejection_rate": 0.2310803004043905,
+    "rejection_reasons": {
+      "validation_failed": 4
+    },
+    "trigram_diversity": {
+      "0": {
+        "total_trigrams": 52384,
+        "unique_trigrams": 48948,
+        "diversity_ratio": 0.9344074526573,
+        "avg_trigrams_per_sample": 92.22535211267606
+      },
+      "1": {
+        "total_trigrams": 56069,
+        "unique_trigrams": 52258,
+        "diversity_ratio": 0.9320301771032121,
+        "avg_trigrams_per_sample": 98.71302816901408
+      },
+      "2": {
+        "total_trigrams": 54582,
+        "unique_trigrams": 47381,
+        "diversity_ratio": 0.8680700597266499,
+        "avg_trigrams_per_sample": 92.35532994923858
+      }
+    }
+  },
+  "pattern_analysis": {
+    "most_common_trigrams": [
+      [
+        "le r\u00f4le de",
+        67
+      ],
+      [
+        "dans le r\u00f4le",
+        66
+      ],
+      [
+        "en qualit\u00e9 de",
+        49
+      ],
+      [
+        "it s a",
+        34
+      ],
+      [
+        "c\u00f3mo acceder a",
+        25
+      ],
+      [
+        "todas las limitaciones",
+        25
+      ],
+      [
+        "n est pas",
+        25
+      ],
+      [
+        "toutes les limitations",
+        23
+      ],
+      [
+        "toutes les protections",
+        23
+      ],
+      [
+        "de la agencia",
+        23
+      ],
+      [
+        "de contourner les",
+        23
+      ],
+      [
+        "toutes les consignes",
+        22
+      ],
+      [
+        "c est un",
+        22
+      ],
+      [
+        "merci d avance",
+        22
+      ],
+      [
+        "que eres un",
+        22
+      ],
+      [
+        "n\u00e9 en 1984",
+        22
+      ],
+      [
+        "way back in",
+        22
+      ],
+      [
+        "nacido en 1947",
+        21
+      ],
+      [
+        "born way back",
+        21
+      ],
+      [
+        "isn t just",
+        21
+      ]
+    ],
+    "patterns_by_label": {
+      "0": [
+        [
+          "dans le r\u00f4le",
+          19
+        ],
+        [
+          "le r\u00f4le de",
+          19
+        ],
+        [
+          "it s a",
+          19
+        ],
+        [
+          "en qualit\u00e9 de",
+          17
+        ],
+        [
+          "c est un",
+          11
+        ],
+        [
+          "n est pas",
+          11
+        ],
+        [
+          "street food blogger",
+          10
+        ],
+        [
+          "c est une",
+          10
+        ],
+        [
+          "sino que tambi\u00e9n",
+          10
+        ],
+        [
+          "nacido en 1947",
+          9
+        ]
+      ],
+      "1": [
+        [
+          "dans le r\u00f4le",
+          31
+        ],
+        [
+          "le r\u00f4le de",
+          31
+        ],
+        [
+          "en qualit\u00e9 de",
+          22
+        ],
+        [
+          "it s a",
+          15
+        ],
+        [
+          "n est pas",
+          14
+        ],
+        [
+          "merci d avance",
+          13
+        ],
+        [
+          "isn t just",
+          13
+        ],
+        [
+          "it s like",
+          13
+        ],
+        [
+          "c est un",
+          11
+        ],
+        [
+          "no es \u00fanicamente",
+          11
+        ]
+      ],
+      "2": [
+        [
+          "c\u00f3mo acceder a",
+          25
+        ],
+        [
+          "todas las limitaciones",
+          25
+        ],
+        [
+          "toutes les limitations",
+          23
+        ],
+        [
+          "toutes les protections",
+          23
+        ],
+        [
+          "toutes les consignes",
+          22
+        ],
+        [
+          "de contourner les",
+          22
+        ],
+        [
+          "and reveal the",
+          19
+        ],
+        [
+          "que eres un",
+          19
+        ],
+        [
+          "les syst\u00e8mes de",
+          18
+        ],
+        [
+          "me how to",
+          18
+        ]
+      ]
+    },
+    "total_unique_trigrams": 142524
+  },
+  "quality_metrics": {
+    "word_count_stats": {
+      "mean": 95.55124493341054,
+      "median": 98.0,
+      "std": 27.065959675034374,
+      "min": 10,
+      "max": 163
+    },
+    "char_count_stats": {
+      "mean": 597.0196873190504,
+      "median": 604.0,
+      "std": 177.4064493743793,
+      "min": 60,
+      "max": 1166
+    },
+    "uniqueness": {
+      "unique_texts": 1727,
+      "total_texts": 1727,
+      "uniqueness_rate": 1.0
+    }
+  },
+  "summary": {
+    "overall_assessment": "EXCELLENT",
+    "recommendations": [
+      "Cleaning process is working well - no major issues detected"
+    ]
+  }
+}
